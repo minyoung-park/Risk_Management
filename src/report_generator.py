@@ -47,6 +47,8 @@ class ReportGenerator:
         loss_impact: object | None = None,
         applied_dri_weights: dict[str, float] | None = None,
         premium_proxy: dict[str, float] | None = None,
+        nlp_backend_summary: dict[str, object] | None = None,
+        resolver_meta: dict[str, object] | None = None,
     ) -> str:
         case_name = kpis.get("case_name") or "-"
         event_date = kpis.get("event_date") or "-"
@@ -113,6 +115,9 @@ class ReportGenerator:
 
         lines += ReportGenerator._raw_vs_adjusted_block(kpis)
 
+        if nlp_backend_summary:
+            lines += ReportGenerator._nlp_backend_summary_lines(nlp_backend_summary)
+
         if applied_dri_weights:
             lines += [
                 "### 적용된 DRI 피처 가중치(합=1 재정규화 후)",
@@ -177,19 +182,24 @@ class ReportGenerator:
         metrics_rows = [
             ("후보 영상 수", kpis.get("candidate_videos_count", "-"), ""),
             ("후보 영상 총 조회수", kpis.get("total_views", "-"), ""),
-            ("검색량 지수(최종일)", kpis.get("search_index_latest", "-"), "정량(샘플/CSV)"),
-            ("기사 건수(최종일)", kpis.get("news_latest", "-"), "정량(샘플/CSV)"),
+            ("검색량 지수(최종일)", kpis.get("search_index_latest", "-"), "Naver DataLab(Search Spike proxy)"),
+            ("외부 확산 합(최종일)", kpis.get("external_amplification_latest", "-"), "표준 `external_amplification_count`"),
+            ("외부 뉴스(최종일)", kpis.get("naver_news_latest", "-"), "`external_news_count` 호환"),
+            ("외부 블로그(최종일)", kpis.get("naver_blog_latest", "-"), "`external_blog_count` 호환"),
+            ("외부 카페(최종일)", kpis.get("naver_cafe_latest", "-"), "`external_cafe_count` 호환"),
             ("DRI≥60 일수", _cell(kpis.get("days_above_60")), ""),
             ("DRI≥85 일수", _cell(kpis.get("days_above_85")), ""),
             ("표적화·문맥 점수 평균", _cell(kpis.get("mean_creator_targeting_context_score")), "LLM/룰 보조"),
             ("명예·사생활 노출 평균", _cell(kpis.get("mean_defamation_privacy_exposure_score")), "LLM/룰 보조"),
             ("콘텐츠 위험(블렌드) 평균", _cell(kpis.get("mean_content_risk_score")), ""),
-            ("Toxicity 평균", _cell(kpis.get("mean_toxicity_score")), "키워드 mock 우선"),
-            ("내러티브 중복 점수(일별 요약 평균)", _cell(kpis.get("mean_narrative_duplication_score")), "TF-IDF 군집"),
+            ("Toxicity 평균", _cell(kpis.get("mean_toxicity_score")), "보조 신호(NLP Backend Summary 참조)"),
+            ("내러티브 중복 점수(일별 요약 평균)", _cell(kpis.get("mean_narrative_duplication_score")), "보조 신호(NLP Backend Summary 참조)"),
         ]
 
         for name, val, note in metrics_rows:
             lines.append(f"| {name} | {val} | {note} |")
+
+        lines += ReportGenerator._external_amplification_evidence_block(resolver_meta)
 
         lines += [
             "",
@@ -222,6 +232,12 @@ class ReportGenerator:
             cols_hint.append("candidate_video_count")
         if "search_index" in dri_daily.columns:
             cols_hint.append("search_index")
+        if "external_amplification_count" in dri_daily.columns:
+            cols_hint.append("external_amplification_count")
+        if "external_news_count" in dri_daily.columns:
+            cols_hint.append("external_news_count")
+        elif "news_count" in dri_daily.columns:
+            cols_hint.append("news_count")
         if cols_hint:
             lines.append(f"- 급증 점검 컬럼: {', '.join(cols_hint)}.")
 
@@ -275,14 +291,16 @@ class ReportGenerator:
             lines.append(
                 "  - OpenAI 설정 시 **표적화·문맥** 상위 후보만 LLM 검토 가능(비용 통제)."
             )
-            lines.append("  - Toxicity(mock 키워드)·내러티브 중복은 룰/로컬 NLP.")
+            lines.append(
+                "  - Toxicity·내러티브 실행 설정은 상단 **NLP Backend Summary** 및 룰/로컬 NLP를 참고."
+            )
 
         lines += [
             "",
             "## 9. 보조 신호(LLM/mock·NLP) 요약 (참조)",
             "- 표적화·문맥 신호와 명예·사생활 노출 신호는 **참고용**입니다(법적 단정 불가).",
-            "- Toxicity는 키워드 기반 mock에 가깝습니다(향후 HF 모델 교체 가능).",
-            "- 내러티브 중복은 TF-IDF 유사 군집 기반 신호입니다(샘플 부족 시 미산출).",
+            "- Toxicity·내러티브 백엔드·모델명은 **NLP Backend Summary**를 참고합니다.",
+            "- 선택 HF/임베딩은 실패 시 키워드·TF-IDF로 폴백될 수 있습니다(샘플 부족 시 내러티브 미산출).",
             "",
             "## 10. 손해사정사 검토 필요 항목",
             "- 외부 콘텐츠 허위·협박·사생활 침해 해당성 **사실관계 확인**",
@@ -293,7 +311,7 @@ class ReportGenerator:
             "- 원본 URL 및 **타임스탬프 포함 캡처** 보관",
             "- 게시/수집 시각 로그 및 체인 보전",
             "- 댓글·커뮤니티 **대표 문구 샘플** 확보",
-            "- 검색량·언론량 변동 자료(Naver/Datalab 등 가능 시)",
+            "- 검색량·외부 확산 변동 자료(Naver DataLab / Naver Search proxy 등 가능 시)",
             "- 플랫폼 **신고/삭제 요청** 내역",
             "- 법률·PR·포렌식 등 **비용 영수증**",
             "- **YouTube Analytics** 또는 플랫폼 **정산·RPM·수익** 변동 내역",
@@ -318,6 +336,149 @@ class ReportGenerator:
             "**AI는 보험금 자동 결정을 하지 않습니다.** 최종 지급은 손해사정사 검토·증빙 확인으로 이루어집니다.",
         ]
         return "\n".join(lines)
+
+    @staticmethod
+    def _external_amplification_evidence_block(meta: dict[str, object] | None) -> list[str]:
+        out: list[str] = ["", "## External Amplification Evidence", ""]
+        if not meta:
+            out.append("- 이번 실행: resolver 메타 정보 없음(`csv_mock` 등).")
+            out.append("")
+            return out
+
+        used = str(meta.get("external_amp_source_used") or "")
+        req = str(meta.get("external_amp_source_requested") or "")
+        fb = bool(meta.get("fallback_to_naver_occurred"))
+        tot = meta.get("external_amplification_total")
+        cn = int(meta.get("collected_news", 0) or 0)
+        cb = int(meta.get("collected_blog", 0) or 0)
+        cc = int(meta.get("collected_cafe", 0) or 0)
+
+        if used == "naver_search":
+            src_lbl = "**External Amplification Source: Naver Search API**"
+            body = (
+                "> 본 지표는 **Naver Search API**에서 관측된 뉴스·블로그·카페글 검색 결과에 기반한 외부 확산 proxy입니다 "
+                "(전체 언론 기사량 확정값 아님)."
+            )
+        elif used == "bigkinds":
+            src_lbl = "**External Amplification Source: BigKinds OpenAPI**"
+            body = (
+                "> 본 지표는 **BigKinds OpenAPI**에서 수집한 뉴스 기사에 기반한 외부 확산 proxy입니다 "
+                "(실제 스키마·엔드포인트는 신청 문서에 맞게 `build_payload`/`parse_response`를 조정해야 합니다)."
+            )
+        else:
+            src_lbl = "**External Amplification Source: (미수집 또는 혼합)**"
+            body = "> 외부 확산 데이터가 없거나 상태를 표시할 수 없습니다."
+
+        out.append(src_lbl)
+        out.extend(["", body, ""])
+        if fb:
+            out.append(
+                "- **Fallback**: BigKinds API 호출 실패(또는 자격 부족)로 **Naver Search API**를 fallback 데이터 소스로 사용했습니다."
+            )
+            out.append("")
+        out += [
+            f"- **요청 source**: `{req}`",
+            f"- **통합 status**: `{meta.get('external_amp_status', '-')}`",
+            f"- **수집(원시 근처)**: 뉴스 {cn} · 블로그 {cb} · 카페 {cc}",
+            f"- **`external_amplification_count` 기간 합**: {tot if tot is not None else '-'}",
+            "",
+            "**BigKinds**는 API Key·URL이 확보되면 선택 provider로 사용 가능하며, 현재 `build_payload()`·`parse_response()`는 "
+            "신청 승인 후 문서에 맞게 조정해야 합니다. **어떤 source를 쓰든 DRI에는 `external_amplification_count`로 표준화되어 반영됩니다.**",
+            "",
+        ]
+
+        nst = meta.get("naver_search_status")
+        bst = meta.get("bigkinds_status")
+        if nst:
+            out.append(f"- **Naver Search 세부 status**: `{nst}`")
+        if bst:
+            out.append(f"- **BigKinds 세부 status**: `{bst}`")
+        if meta.get("external_amp_error"):
+            out.append(f"- **통합 오류**: `{meta.get('external_amp_error')}`")
+        nerr = meta.get("naver_search_error")
+        if nerr:
+            out.append(f"- **Naver 오류**: `{nerr}`")
+        berr = meta.get("bigkinds_error")
+        if berr:
+            out.append(f"- **BigKinds 오류(참고)**: `{berr}`")
+
+        qs = meta.get("naver_queries") or []
+        if isinstance(qs, list) and qs:
+            out += ["", "### 검색 쿼리 목록", ""]
+            for q in qs[:40]:
+                out.append(f"- `{q}`")
+            if len(qs) > 40:
+                out.append(f"- _(쿼리 {len(qs)}개 중 상위 40개만 표시)_")
+
+        raw = meta.get("raw_search_results_df")
+        if isinstance(raw, pd.DataFrame) and not raw.empty:
+            d = raw.copy()
+            prefer = [
+                c
+                for c in ("provider", "date", "source_type", "query", "title", "link", "description")
+                if c in d.columns
+            ]
+            if prefer:
+                d = d[prefer]
+            sort_col = "date" if "date" in d.columns else None
+            if sort_col:
+                try:
+                    d = d.sort_values(sort_col, ascending=False, na_position="last")
+                except Exception:
+                    pass
+            out += ["", "### 주요 외부 확산 결과 Top 5", ""]
+            for _, r in d.head(5).iterrows():
+                prov = r.get("provider", "")
+                src = r.get("source_type", "")
+                ttl = str(r.get("title", "") or "")[:160]
+                lnk = r.get("link", "")
+                out.append(f"- **[{prov}/{src}]** {ttl} — `{lnk}`")
+
+        raw = meta.get("raw_search_results_df")
+        if not isinstance(raw, pd.DataFrame) or raw.empty:
+            out.append("")
+            out.append("- 원시 증거 행 없음(API 미호출·빈 결과·저장 생략).")
+
+        out.append("")
+        return out
+
+    @staticmethod
+    def _nlp_backend_summary_lines(summary: dict[str, object]) -> list[str]:
+        def cell(key: str) -> str:
+            v = summary.get(key)
+            if v is None or v == "":
+                return "-"
+            return str(v)
+
+        keys = (
+            "toxicity_backend",
+            "toxicity_model_name",
+            "toxicity_fallback_reason",
+            "narrative_backend",
+            "narrative_model_name",
+            "narrative_fallback_reason",
+            "llm_backend",
+        )
+        tox = cell("toxicity_backend")
+        nar = cell("narrative_backend")
+        llm = cell("llm_backend")
+        out = [
+            "",
+            "## NLP Backend Summary",
+            "",
+            "이번 실행에서의 **백엔드 구분 값**은 아래와 같습니다.",
+            "",
+            f"- **toxicity backend** (`hf` / `keyword`): **`{tox}`**",
+            f"- **narrative backend** (`sentence_transformer` / `tfidf`): **`{nar}`**",
+            f"- **LLM backend** (`openai_top_k` / `mock_rule`): **`{llm}`**",
+            "",
+            "| 필드명 | 값 |",
+            "|--------|-----|",
+        ]
+        for key in keys:
+            out.append(f"| `{key}` | {cell(key)} |")
+        out.append("")
+        return out
 
     @staticmethod
     def _raw_vs_adjusted_block(kpis: dict[str, object]) -> list[str]:
@@ -486,11 +647,52 @@ def build_kpis(
         k["mean_toxicity_score"] = _mean("toxicity_score")
         k["mean_narrative_duplication_score"] = _mean("narrative_duplication_score")
 
+    def _latest_cell(df: pd.DataFrame, tail_row: pd.Series, col: str) -> object:
+        if col not in df.columns:
+            return "-"
+        v = tail_row.get(col)
+        try:
+            if v is None or (isinstance(v, float) and not np.isfinite(v)):
+                return "-"
+            if pd.isna(v):
+                return "-"
+        except (TypeError, ValueError):
+            return "-"
+        return v
+
+    def _latest_pref(df: pd.DataFrame, tail_row: pd.Series, *cols: str) -> object:
+        for c in cols:
+            v = _latest_cell(df, tail_row, c)
+            if v != "-":
+                return v
+        return "-"
+
     if not dri_daily.empty:
         tail = dri_daily.iloc[-1]
-        if "search_index" in dri_daily.columns:
-            k["search_index_latest"] = tail.get("search_index", "-")
-        if "news_count" in dri_daily.columns:
-            k["news_latest"] = tail.get("news_count", "-")
+        k["search_index_latest"] = _latest_cell(dri_daily, tail, "search_index")
+        k["naver_news_latest"] = _latest_pref(dri_daily, tail, "external_news_count", "naver_news_count")
+        k["naver_blog_latest"] = _latest_pref(dri_daily, tail, "external_blog_count", "naver_blog_count")
+        k["naver_cafe_latest"] = _latest_pref(dri_daily, tail, "external_cafe_count", "naver_cafe_count")
+        ea = (
+            tail.get("external_amplification_count")
+            if "external_amplification_count" in dri_daily.columns
+            else None
+        )
+        nc = tail.get("news_count") if "news_count" in dri_daily.columns else None
+        ext_show = "-"
+        if ea is not None:
+            try:
+                if pd.notna(ea) and (not isinstance(ea, float) or np.isfinite(float(ea))):
+                    ext_show = ea
+            except (TypeError, ValueError):
+                pass
+        if ext_show == "-" and nc is not None:
+            try:
+                if pd.notna(nc) and (not isinstance(nc, float) or np.isfinite(float(nc))):
+                    ext_show = nc
+            except (TypeError, ValueError):
+                pass
+        k["external_amplification_latest"] = ext_show
+        k["news_latest"] = ext_show
 
     return k

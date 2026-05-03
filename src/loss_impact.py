@@ -73,17 +73,22 @@ def estimate_loss_impact(
     )
     peak_use = max(pk, peak_raw, peak_adj)
 
-    news_spike = _signal_strength_0_100(dri_daily, "news_count")
+    ext_col = (
+        "external_amplification_count"
+        if "external_amplification_count" in dri_daily.columns
+        else "news_count"
+    )
+    external_spike = _signal_strength_0_100(dri_daily, ext_col)
     search_spike = _signal_strength_0_100(dri_daily, "search_index")
 
     mean_tx = _to_float_metric(kpis, "mean_toxicity_score")
     toxicity_signal = mean_tx if mean_tx is not None else 0.0
 
-    if mt.sponsorship_share >= 0.25 and (news_spike > 60 or search_spike > 60):
+    if mt.sponsorship_share >= 0.25 and (external_spike > 60 or search_spike > 60):
         affected.append("advertising_sponsorship")
         coverage.append("광고·협찬 계약 손실 특약 검토")
         explanation.append(
-            "광고·협찬 비중이 높고 검색/기사 확산이 커 브랜드 세이프티 리스크가 커 보입니다."
+            "광고·협찬 비중이 높고 검색 지수·외부 확산(Naver Search proxy) 신호가 커 브랜드 세이프티 리스크가 커 보입니다."
         )
 
     if mt.donation_membership_share + mt.live_share >= 0.25 and toxicity_signal > 0.3:

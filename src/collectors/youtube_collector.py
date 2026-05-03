@@ -29,9 +29,16 @@ class YouTubeCollector:
         api_key: str | None = None,
         fallback_videos_csv: Path | None = None,
         max_comments_videos: int = 15,
+        allow_csv_fallback: bool = True,
     ) -> None:
         self._api_key = (api_key or get_youtube_api_key() or "").strip() or None
-        self._fallback_csv = fallback_videos_csv or (DATA_DIR / "sample_candidate_videos.csv")
+        self._allow_csv_fallback = bool(allow_csv_fallback)
+        if fallback_videos_csv is not None:
+            self._fallback_csv = fallback_videos_csv
+        elif self._allow_csv_fallback:
+            self._fallback_csv = DATA_DIR / "sample_candidate_videos.csv"
+        else:
+            self._fallback_csv = None
         self._max_comments_videos = max(1, int(max_comments_videos))
 
     def search_via_api(
@@ -184,8 +191,10 @@ class YouTubeCollector:
         start_date: date | None,
         end_date: date | None,
     ) -> pd.DataFrame:
+        if not self._allow_csv_fallback:
+            return pd.DataFrame()
         try:
-            if not self._fallback_csv.exists():
+            if self._fallback_csv is None or not self._fallback_csv.exists():
                 return pd.DataFrame()
             df = pd.read_csv(self._fallback_csv)
             if "published_at" in df.columns:
@@ -212,7 +221,7 @@ class YouTubeCollector:
         start_date: date | None,
         end_date: date | None,
     ) -> pd.DataFrame:
-        """API 우선, 실패·빈 결과 시 fallback CSV."""
+        """API 우선, 실패·빈 결과 시 fallback CSV(api_only에서는 비활성)."""
         api_df = self.search_via_api(creator_name, keywords, start_date, end_date)
         if not api_df.empty:
             return api_df

@@ -28,10 +28,12 @@ class PublicChannelAnalyticsCollector:
         provider: Provider = "manual_csv",
         manual_metrics_csv: Path | None = None,
         fallback_daily_csv: Path | None = None,
+        disallow_csv_reads: bool = False,
     ) -> None:
         self.provider = provider
         self._manual_metrics_csv = manual_metrics_csv
         self._fallback_daily_csv = fallback_daily_csv or (DATA_DIR / "sample_daily_metrics.csv")
+        self._disallow_csv_reads = bool(disallow_csv_reads)
 
     def fetch_public_channel_metrics(
         self,
@@ -40,6 +42,15 @@ class PublicChannelAnalyticsCollector:
         end_date: date | None,
     ) -> pd.DataFrame:
         _ = channel_url
+
+        if self._disallow_csv_reads:
+            return pd.DataFrame(
+                columns=[
+                    "date",
+                    "creator_channel_daily_views",
+                    "creator_channel_subscriber_change",
+                ]
+            )
 
         if self.provider != "manual_csv":
             logger.info(

@@ -18,7 +18,7 @@ _QUANT_FEATURES: tuple[tuple[str, str, float], ...] = (
     ("candidate_content_exposure_spike", "candidate_video_total_views", 0.15),
     ("comment_volume_spike", "candidate_video_comment_count", 0.15),
     ("search_spike", "search_index", 0.10),
-    ("news_amplification", "news_count", 0.10),
+    ("external_amplification", "external_amplification_count", 0.10),
 )
 
 _NLP_FEATURES: tuple[tuple[str, float], ...] = (
@@ -58,7 +58,7 @@ def adjust_weights_by_creator_profile(
     w["candidate_content_exposure_spike"] += 0.05 * mt.longform_share
 
     w["search_spike"] += 0.04 * mt.sponsorship_share
-    w["news_amplification"] += 0.04 * mt.sponsorship_share
+    w["external_amplification"] += 0.04 * mt.sponsorship_share
     w["creator_targeting_context_score"] += 0.04 * mt.sponsorship_share
 
     fandom_share = mt.donation_membership_share + mt.live_share
@@ -133,6 +133,8 @@ class DRICalculator:
         creator_targeting_by_date: pd.Series | None,
         baseline: DRIBaseline | None = None,
         creator_profile: CreatorProfile | None = None,
+        *,
+        allow_legacy_news_count_fill: bool = True,
     ) -> pd.DataFrame:
         if daily_metrics.empty or "date" not in daily_metrics.columns:
             nan_frame = daily_metrics.assign(
@@ -142,6 +144,8 @@ class DRICalculator:
                 creator_vulnerability_multiplier=np.nan,
                 dominant_revenue_type="-",
                 profile_adjusted=False,
+                missing_features="",
+                used_features="",
             )
             return nan_frame
 
@@ -157,6 +161,15 @@ class DRICalculator:
 
         base_line = baseline or build_baseline(daily_metrics)
         work = daily_metrics.sort_values("date").reset_index(drop=True).copy()
+        legacy_nc = pd.to_numeric(work["news_count"], errors="coerce") if "news_count" in work.columns else None
+        if "external_amplification_count" not in work.columns:
+            work["external_amplification_count"] = np.nan
+        work["external_amplification_count"] = pd.to_numeric(
+            work["external_amplification_count"], errors="coerce"
+        )
+        if allow_legacy_news_count_fill and legacy_nc is not None:
+            work["external_amplification_count"] = work["external_amplification_count"].combine_first(legacy_nc)
+
         dates_norm = pd.to_datetime(work["date"], errors="coerce").dt.normalize()
 
         tox = nar = tgt = None
@@ -178,9 +191,12 @@ class DRICalculator:
 
         raw_dri_list: list[float] = []
         adj_dri_list: list[float] = []
+        missing_features_rows: list[str] = []
+        used_features_rows: list[str] = []
 
         for i in range(len(work)):
             pairs: list[tuple[float, float]] = []
+            present: set[str] = set()
 
             for key, col, _ in _QUANT_FEATURES:
                 if col not in work.columns:
@@ -202,6 +218,7 @@ class DRICalculator:
                 z = safe_z(v, mu, sd)
                 score = z_to_normalized_score(z)
                 pairs.append((score, w_use))
+                present.add(key)
 
             if tox is not None:
                 tt = tox.iloc[i] if hasattr(tox, "iloc") else float("nan")
@@ -213,6 +230,7 @@ class DRICalculator:
                     w_t = float(w_adj.get("toxicity_score", 0.0))
                     if w_t > 0:
                         pairs.append((ttf * 100.0, w_t))
+                        present.add("toxicity_score")
 
             if nar is not None:
                 nv = nar.iloc[i] if hasattr(nar, "iloc") else float("nan")
@@ -224,6 +242,7 @@ class DRICalculator:
                     w_n = float(w_adj.get("narrative_duplication_score", 0.0))
                     if w_n > 0:
                         pairs.append((nvf * 100.0, w_n))
+                        present.add("narrative_duplication_score")
 
             if tgt is not None:
                 gv = tgt.iloc[i] if hasattr(tgt, "iloc") else float("nan")
@@ -235,6 +254,11 @@ class DRICalculator:
                     w_g = float(w_adj.get("creator_targeting_context_score", 0.0))
                     if w_g > 0:
                         pairs.append((gvf * 100.0, w_g))
+                        present.add("creator_targeting_context_score")
+
+            active = {k for k, wv in w_adj.items() if float(wv) > 0}
+            missing_features_rows.append(",".join(sorted(active - present)))
+            used_features_rows.append(",".join(sorted(present)))
 
             agg = _normalize_weights(pairs)
             if agg is None:
@@ -251,4 +275,6 @@ class DRICalculator:
         work["creator_vulnerability_multiplier"] = float(mult)
         work["dominant_revenue_type"] = dom_type
         work["profile_adjusted"] = bool(profile_flag)
+        work["missing_features"] = missing_features_rows
+        work["used_features"] = used_features_rows
         return work

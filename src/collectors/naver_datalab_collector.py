@@ -33,11 +33,15 @@ class NaverDataLabCollector:
         keyword_groups: list[list[str]],
         start_date: date | None,
         end_date: date | None,
+        *,
+        allow_csv_fallback: bool = True,
     ) -> pd.DataFrame:
         if self._client_id and self._client_secret and start_date and end_date:
             df = self._fetch_via_api(keyword_groups, start_date, end_date)
             if df is not None and not df.empty:
                 return df
+        if not allow_csv_fallback:
+            return pd.DataFrame(columns=["date", "search_index"])
         return self._fetch_via_csv_fallback(start_date, end_date)
 
     def _fetch_via_api(

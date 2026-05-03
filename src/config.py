@@ -41,9 +41,49 @@ def get_naver_client_secret() -> str | None:
 
 
 def get_bigkinds_api_key() -> str | None:
-    """예약: 실제 Open API 도입 전까지 미사용."""
     key = os.getenv("BIGKINDS_API_KEY", "").strip()
     return key or None
+
+
+def get_bigkinds_api_url() -> str | None:
+    u = os.getenv("BIGKINDS_API_URL", "").strip()
+    return u or None
+
+
+def get_bigkinds_timeout_seconds() -> float:
+    raw = os.getenv("BIGKINDS_TIMEOUT_SECONDS", "").strip()
+    if not raw:
+        return 10.0
+    try:
+        t = float(raw)
+        return t if t > 0 else 10.0
+    except ValueError:
+        return 10.0
+
+
+def get_external_amp_source() -> str:
+    v = os.getenv("EXTERNAL_AMP_SOURCE", "").strip().lower()
+    if v in ("naver_search", "bigkinds", "auto"):
+        return v
+    return "naver_search"
+
+
+def get_external_amp_fallback_to_naver() -> bool:
+    raw = os.getenv("EXTERNAL_AMP_FALLBACK_TO_NAVER", "").strip().lower()
+    if raw in ("0", "false", "no", "off"):
+        return False
+    return True
+
+
+def get_naver_search_timeout_seconds() -> float:
+    raw = os.getenv("NAVER_SEARCH_TIMEOUT_SECONDS", "").strip()
+    if not raw:
+        return 10.0
+    try:
+        t = float(raw)
+        return t if t > 0 else 10.0
+    except ValueError:
+        return 10.0
 
 
 def get_dri_z_score_divisor() -> float:

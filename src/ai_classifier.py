@@ -62,6 +62,8 @@ class AIContentRiskClassifier:
         client: LLMClient | None = None,
         force_mock: bool = False,
         max_llm_items: int = 10,
+        toxicity_model: KoreanToxicityModel | None = None,
+        narrative_cluster_model: NarrativeClusterModel | None = None,
     ) -> None:
         self.force_mock = bool(force_mock)
         self.max_llm_items = max(1, int(max_llm_items))
@@ -70,7 +72,11 @@ class AIContentRiskClassifier:
             self._api_client: LLMClient | None = None
         else:
             self._api_client = client or build_llm_client()
-        self._toxic = KoreanToxicityModel()
+        self._toxic = toxicity_model or KoreanToxicityModel()
+        self._narrative = narrative_cluster_model or NarrativeClusterModel(
+            similarity_threshold=0.80,
+            min_samples=3,
+        )
 
     def classify_row_via_client(
         self,
@@ -202,7 +208,7 @@ class AIContentRiskClassifier:
         out["narrative_duplication_score"] = np.nan
         out["narrative_cluster_id"] = -1
 
-        nar_model = NarrativeClusterModel(similarity_threshold=0.80, min_samples=3)
+        nar_model = self._narrative
 
         for day_val, chunk in out.groupby("publish_day", dropna=False):
             if pd.isna(day_val):
