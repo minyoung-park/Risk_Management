@@ -113,7 +113,7 @@ export default function SnapshotHistory({ snapshots }: Props) {
                     {/* 다운로드 */}
                     <button
                       onClick={() => downloadSnapshot(snap)}
-                      className="flex items-center gap-1.5 text-xs text-indigo-600 hover:text-indigo-800 font-medium border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-50 transition-colors"
+                      className="flex items-center gap-1.5 text-xs text-[#0038A8] hover:text-[#002d87] font-medium border border-blue-200 rounded-lg px-3 py-1.5 hover:bg-blue-50 transition-colors"
                     >
                       ↓ 스냅샷 다운로드 (JSON)
                     </button>

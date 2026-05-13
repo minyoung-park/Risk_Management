@@ -2,7 +2,7 @@
 // USE_MOCK=true 일 때는 mockData를 반환
 // USE_MOCK=false 로 바꾸고 YOUTUBE_API_KEY 환경변수를 설정하면 실제 API 호출
 
-const USE_MOCK = true;
+import { USE_MOCK } from '../config';
 const API_KEY = process.env.NEXT_PUBLIC_YOUTUBE_API_KEY ?? '';
 const BASE_URL = 'https://www.googleapis.com/youtube/v3';
 

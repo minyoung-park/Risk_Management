@@ -2,7 +2,7 @@
 // USE_MOCK=false + 환경변수 설정 시 실제 API 호출
 // Naver API는 서버사이드에서만 호출 가능(CORS) → Next.js API Route(/api/naver/*)로 프록시 필요
 
-const USE_MOCK = true;
+import { USE_MOCK } from '../config';
 
 export interface SearchTrendPoint {
   period: string; // 'YYYY-MM-DD'

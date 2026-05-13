@@ -2,7 +2,7 @@
 // USE_MOCK=false + NEXT_PUBLIC_LLM_API_KEY 설정 시 실제 API 호출
 // 민감 정보는 절대 LLM에 입력하지 않음 (types.ts 의 민감 데이터 목록 참고)
 
-const USE_MOCK = true;
+import { USE_MOCK } from '../config';
 
 export interface LLMSummaryInput {
   creatorName: string;

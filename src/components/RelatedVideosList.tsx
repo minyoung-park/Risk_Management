@@ -26,7 +26,7 @@ export default function RelatedVideosList({ videos, totalCount }: Props) {
         </div>
         <button
           onClick={() => setOpen((v) => !v)}
-          className="flex items-center gap-1.5 text-xs text-indigo-600 hover:text-indigo-800 font-medium transition-colors"
+          className="flex items-center gap-1.5 text-xs text-[#0038A8] hover:text-[#002d87] font-medium transition-colors"
         >
           {open ? '목록 닫기 ▲' : '목록 보기 ▼'}
         </button>

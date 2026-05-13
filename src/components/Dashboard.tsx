@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Image from 'next/image';
 import { useMonitoringData } from '../hooks/useMonitoringData';
 import KPISummary from './KPISummary';
 import DRIPanel from './DRIPanel';
@@ -47,17 +48,20 @@ export default function Dashboard() {
   const relatedVideoCount = latestSnap?.relatedVideos ?? relatedVideos.length;
 
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-800">
+    <div className="min-h-screen bg-[#f0f4f8] text-slate-800">
       {/* 헤더 */}
-      <header className="border-b border-slate-200 bg-white sticky top-0 z-40 shadow-sm">
+      <header className="bg-white sticky top-0 z-40 shadow-sm border-b-2 border-[#0038A8]">
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-xs font-bold text-white">
+            <div className="w-8 h-8 bg-[#0038A8] rounded-lg flex items-center justify-center text-xs font-bold text-white">
               AI
             </div>
             <div>
               <div className="text-sm font-semibold text-slate-800">AI 안심 케어 보험</div>
               <div className="text-xs text-slate-500">실시간 모니터링 대시보드</div>
+            </div>
+            <div className="relative h-7 w-24 flex-shrink-0">
+              <Image src="/sf-logo.png" alt="삼성화재" fill className="object-contain object-left" />
             </div>
           </div>
 
@@ -104,7 +108,7 @@ export default function Dashboard() {
 
             <button
               onClick={() => setShowModal(true)}
-              className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-xl text-sm transition-colors shadow-sm"
+              className="w-full py-3 bg-[#0038A8] hover:bg-[#002d87] text-white font-medium rounded-xl text-sm transition-colors shadow-sm"
             >
               + 사고 정보 입력
             </button>
@@ -135,7 +139,7 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
     <button
       onClick={onClick}
       className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors
-        ${active ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+        ${active ? 'bg-white text-[#0038A8] shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
     >
       {children}
     </button>
