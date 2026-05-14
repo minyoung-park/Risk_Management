@@ -1,13 +1,13 @@
 import type { DRISignals, DRIResult, DRIStage } from '../types';
 
 const WEIGHTS: Record<keyof DRISignals, number> = {
-  searchSpike: 0.15,
-  commentAttackVelocity: 0.15,
-  toxicityDuplication: 0.15,
-  harmfulContentExposure: 0.20,
-  newsSNSAmplification: 0.10,
-  manipulationSignal: 0.10,
-  economicDisruptionSignal: 0.15,
+  searchSpike:               0.20,
+  commentAttackVelocity:     0.20,
+  toxicityDuplication:       0.20,
+  harmfulContentExposure:    0.15,
+  newsSNSAmplification:      0.10,
+  manipulationSignal:        0.10,
+  economicDisruptionSignal:  0.05,
 };
 
 function getStage(score: number): DRIStage {

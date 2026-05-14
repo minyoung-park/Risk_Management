@@ -30,7 +30,7 @@ interface UseMonitoringDataReturn {
   submitIncident: (input: IncidentInput) => void;
 }
 
-export function useMonitoringData(creatorKeyword: string): UseMonitoringDataReturn {
+export function useMonitoringData(creatorKeyword: string, analysisDate?: string, creatorName?: string): UseMonitoringDataReturn {
   const [data, setData] = useState<MonitoringData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -43,7 +43,7 @@ export function useMonitoringData(creatorKeyword: string): UseMonitoringDataRetu
         setLoading(true);
         setError(null);
 
-        const dri = await fetchDRIResult(creatorKeyword);
+        const dri = await fetchDRIResult(creatorKeyword, analysisDate, creatorName);
         if (cancelled) return;
 
         // localStorage 스냅샷 로드 (없으면 mock 스냅샷으로 시드)
@@ -86,7 +86,7 @@ export function useMonitoringData(creatorKeyword: string): UseMonitoringDataRetu
 
     load();
     return () => { cancelled = true; };
-  }, [creatorKeyword]);
+  }, [creatorKeyword, analysisDate, creatorName]);
 
   function submitIncident(input: IncidentInput) {
     if (!data) return;

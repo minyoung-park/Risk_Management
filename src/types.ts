@@ -20,11 +20,18 @@ export interface DRISignalDetail {
   subFactors: string[];
 }
 
+export interface TrendDataPoint {
+  date: string;             // YYYY-MM-DD
+  baseRatio: number;        // Naver DataLab base keyword ratio (0–100)
+  controversyRatio: number; // Naver DataLab controversy keyword ratio (0–100)
+}
+
 export interface DRIResult {
   score: number;
   stage: DRIStage;
   signals: DRISignals;
   signalDetails: DRISignalDetail[];
+  trendSeries?: TrendDataPoint[]; // 30-day search trend, only present in real API mode
 }
 
 // ─── 크리에이터 프로필 ───────────────────────────────────────────────────────────
