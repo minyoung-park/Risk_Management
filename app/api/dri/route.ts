@@ -264,20 +264,29 @@ export async function GET(req: NextRequest) {
   const oneYearAgo = new Date(refTs - 365 * 864e5).toISOString().slice(0, 10);
   const sevenDaysAgoTs = refTs - 7 * 864e5;
 
+  // 크리에이터 영상 수집 윈도우: 사건일 기준 -2년 ~ +180일
+  // PDF 방식: WINDOW_START ~ WINDOW_END 범위로 채널 전체 수집 후 사건 전/후 분리
+  // (오킹 WINDOW_END=2024-06-01 → 사건 후 ~113일, 여유있게 180일로 설정)
+  const creatorWindowEnd   = new Date(refTs + 180 * 864e5).toISOString();
+  const creatorWindowStart = new Date(refTs - 730 * 864e5).toISOString();
+  const refNow = Math.min(refTs + 180 * 864e5, Date.now());
+
   const naverKw = nameParam || naverKeyword(searchKeyword);
   const controversyQuery = `${naverKw} 논란`;
-  // YouTube 시간 범위: 기준일 이전 전체 기간 (pubBefore만 사용)
-  const pubBefore = encodeURIComponent(new Date(refDate + 'T23:59:59Z').toISOString());
 
   const [controversySearchData, creatorSearchData, trendData, googleTrendData] = await Promise.all([
     // 논란 키워드 특화 제3자 영상 (harmfulContentExposure) — 전체 기간
     fetch(
       `${YT_BASE}/search?part=snippet&q=${encodeURIComponent(controversyQuery)}&type=video&maxResults=20&order=relevance&regionCode=KR&relevanceLanguage=ko&key=${YT_KEY}`,
     ).then(r => r.json()),
-    // 크리에이터 본인 영상: uploads 플레이리스트 (search API가 일부 채널에서 0 반환하는 문제 우회)
+    // 크리에이터 본인 영상: 사건일 ±2년 윈도우 (노트북: WINDOW_START~WINDOW_END)
+    // → CAV·EDS 사건 전/후 비교에 사용
     creatorChannelId
       ? fetch(
-          `${YT_BASE}/playlistItems?part=snippet&playlistId=UU${creatorChannelId.slice(2)}&maxResults=20&key=${YT_KEY}`,
+          `${YT_BASE}/search?part=snippet&channelId=${creatorChannelId}&type=video` +
+          `&publishedBefore=${encodeURIComponent(creatorWindowEnd)}` +
+          `&publishedAfter=${encodeURIComponent(creatorWindowStart)}` +
+          `&order=date&maxResults=50&key=${YT_KEY}`,
         ).then(r => r.json())
       : Promise.resolve({ items: [] }),
     // DataLab: 1년치 일별 데이터 — Z-score 베이스라인 확보 (노트북 방식)
@@ -321,12 +330,10 @@ export async function GET(req: NextRequest) {
     .filter((_: unknown, idx: number) => relevanceResults[idx])
     .map((v: { videoId: string }) => v.videoId);
 
-  // 크리에이터 영상 ID (playlistItems → resourceId.videoId)
+  // 크리에이터 영상 ID (search API → id.videoId, 최대 50개)
   const creatorVideoIds: string[] = (creatorSearchData.items ?? [])
-    .map((i: { snippet: { resourceId?: { videoId: string } } }) =>
-      i.snippet.resourceId?.videoId ?? '')
-    .filter(Boolean)
-    .slice(0, 10);
+    .map((i: { id: { videoId?: string } }) => i.id.videoId ?? '')
+    .filter(Boolean);
 
   // ── searchSpike: 노트북 방식 주간 rolling 13주 Z-score ──────────────────
   const baseTrend        = (trendData.results?.[0]?.data ?? []) as { period: string; ratio: number }[];
@@ -384,56 +391,112 @@ export async function GET(req: NextRequest) {
     (s: number, v: { statistics: { viewCount?: string } }) => s + parseInt(v.statistics.viewCount ?? '0'), 0,
   );
 
-  // 크리에이터 영상: Shorts 제외 (EDS/CAV 계산용)
-  const creatorVideos = (creatorStatsData.items ?? []).filter(
+  type CreatorVideo = {
+    snippet: { publishedAt: string };
+    statistics: { viewCount?: string; commentCount?: string };
+    contentDetails: { duration: string };
+  };
+
+  // 크리에이터 영상: Shorts 제외 (duration > 60초)
+  const creatorVideos: CreatorVideo[] = (creatorStatsData.items ?? []).filter(
     (v: { contentDetails: { duration: string } }) => durationToSec(v.contentDetails?.duration ?? '') > 60,
   );
 
+  // 사건 전/후 분리 (노트북 방식: INCIDENT_DATE 기준)
+  const beforeVideos = creatorVideos.filter(
+    v => new Date(v.snippet.publishedAt).getTime() < refTs,
+  );
+  const afterVideos = creatorVideos.filter(v => {
+    const ts = new Date(v.snippet.publishedAt).getTime();
+    return ts >= refTs && ts <= refNow;
+  });
+
   // ── HCE: 노트북 방식 — 채널 전체 평균 조회수를 baseline으로 사용 ──────────
-  // 노트북: youtube_tzuyang_full.csv 전체 영상 평균 → 채널 통계 API로 대체
-  const chStats = channelStatsData.items?.[0]?.statistics;
+  const chStats      = channelStatsData.items?.[0]?.statistics;
   const chTotalViews = parseInt(chStats?.viewCount ?? '0');
   const chVideoCount = parseInt(chStats?.videoCount ?? '0');
   const ownAvgViews  = chVideoCount > 0 ? chTotalViews / chVideoCount : 0;
-  const hceScore = Math.min(100, ownAvgViews > 0 ? (totalViews / ownAvgViews) * 10 : 0);
+  const hceScore     = Math.min(100, ownAvgViews > 0 ? (totalViews / ownAvgViews) * 10 : 0);
 
-  // ── 경제 신호: 조회수 변화율 + 업로드 공백 ──────────────────────────────
-  let viewDropRate = 0, uploadGapDays = 0, recentAvgViews = 0, prevAvgViews = 0;
+  // ── CAV: 노트북 방식 — 사건 전/후 댓글 속도 비율 ──────────────────────────
+  // 노트북: comment_count / hours_since_upload, 사건 전/후 평균 비교
+  // 문복희 1.58× → 58점, 오킹 78.15× → 100점, 쯔양 2.59× → 100점
+  // PDF 공식: min(100, (ratio - 1) × 100)
+  const calcVelocity = (v: CreatorVideo) => {
+    const hoursSince = (refNow - new Date(v.snippet.publishedAt).getTime()) / 3_600_000;
+    const count      = parseInt(v.statistics.commentCount ?? '0');
+    return hoursSince > 0 ? count / hoursSince : 0;
+  };
 
-  if (creatorVideos.length > 0) {
-    uploadGapDays = Math.floor(
-      (Date.now() - new Date(creatorVideos[0].snippet.publishedAt).getTime()) / 864e5,
-    );
-    const viewCounts: number[] = creatorVideos
-      .map((v: { statistics: { viewCount?: string } }) => parseInt(v.statistics.viewCount ?? '0'))
-      .filter((v: number) => v > 0);
+  const beforeVel = beforeVideos.map(calcVelocity).filter(v => v > 0);
+  const afterVel  = afterVideos.map(calcVelocity).filter(v => v > 0);
 
-    if (viewCounts.length >= 4) {
-      recentAvgViews = mean(viewCounts.slice(0, 3));
-      prevAvgViews   = mean(viewCounts.slice(3, 6));
-      viewDropRate   = prevAvgViews > 0 ? Math.max(0, 1 - recentAvgViews / prevAvgViews) : 0;
+  let cavScore = 0;
+  let commentVelocityZ = 0; // meta용 (ratio 값)
+
+  if (afterVel.length > 0 && beforeVel.length > 0) {
+    const beforeMean = mean(beforeVel);
+    const afterMean  = mean(afterVel);
+    const cavRatio   = beforeMean > 0 ? afterMean / beforeMean : 0;
+    cavScore         = Math.min(100, Math.max(0, (cavRatio - 1) * 100));
+    commentVelocityZ = cavRatio;
+  } else if (creatorVideos.length >= 4) {
+    // fallback: 최신 영상 vs 이전 영상 Z-score 방식
+    const allVel = creatorVideos
+      .map(v => {
+        const hoursSince = (Date.now() - new Date(v.snippet.publishedAt).getTime()) / 3_600_000;
+        return hoursSince > 0 ? parseInt(v.statistics.commentCount ?? '0') / hoursSince : 0;
+      })
+      .filter(v => v > 0);
+    if (allVel.length >= 4) {
+      const recentVel    = mean(allVel.slice(0, 3));
+      const baselineMean = mean(allVel.slice(3));
+      const baselineStd  = std(allVel.slice(3));
+      commentVelocityZ   = baselineStd > 0
+        ? Math.max(0, (recentVel - baselineMean) / baselineStd)
+        : Math.max(0, baselineMean > 0 ? recentVel / baselineMean - 1 : 0);
+      cavScore = Math.min(100, commentVelocityZ * 6.5);
     }
   }
 
-  // ── comment velocity: comment_count / hours_since_upload (노트북 방식) ──
-  const now = Date.now();
-  const videoVelocities: number[] = creatorVideos
-    .map((v: { snippet: { publishedAt: string }; statistics: { commentCount?: string } }) => {
-      const hoursSince = (now - new Date(v.snippet.publishedAt).getTime()) / 3_600_000;
-      const count      = parseInt(v.statistics.commentCount ?? '0');
-      return hoursSince > 0 ? count / hoursSince : 0;
-    })
-    .filter((v: number) => v > 0);
+  // ── EDS: 노트북 방식 — 사건 전/후 조회수 변화 + 최대 업로드 공백 ──────────
+  let viewDropRate = 0, uploadGapDays = 0, recentAvgViews = 0, prevAvgViews = 0;
 
-  let commentVelocityZ = 0;
-  if (videoVelocities.length >= 4) {
-    const recentVel   = mean(videoVelocities.slice(0, 3));
-    const baselineArr = videoVelocities.slice(3);
-    const baselineMean = mean(baselineArr);
-    const baselineStd  = std(baselineArr);
-    commentVelocityZ = baselineStd > 0
-      ? Math.max(0, (recentVel - baselineMean) / baselineStd)
-      : Math.max(0, baselineMean > 0 ? recentVel / baselineMean - 1 : 0);
+  if (creatorVideos.length > 0) {
+    // 연속 영상 간 최대 공백 (사건 전후 업로드 중단 탐지)
+    const sortedVideos = [...creatorVideos].sort(
+      (a, b) => new Date(a.snippet.publishedAt).getTime() - new Date(b.snippet.publishedAt).getTime(),
+    );
+    let maxGap = 0;
+    for (let i = 1; i < sortedVideos.length; i++) {
+      const gap = Math.floor(
+        (new Date(sortedVideos[i].snippet.publishedAt).getTime() -
+         new Date(sortedVideos[i - 1].snippet.publishedAt).getTime()) / 864e5,
+      );
+      if (gap > maxGap) maxGap = gap;
+    }
+    uploadGapDays = maxGap;
+
+    // 조회수 변화: 사건 전 평균 vs 사건 후 평균
+    if (beforeVideos.length > 0 && afterVideos.length > 0) {
+      const beforeVc = beforeVideos
+        .map(v => parseInt(v.statistics.viewCount ?? '0')).filter(v => v > 0);
+      const afterVc = afterVideos
+        .map(v => parseInt(v.statistics.viewCount ?? '0')).filter(v => v > 0);
+      if (beforeVc.length > 0 && afterVc.length > 0) {
+        prevAvgViews   = mean(beforeVc);
+        recentAvgViews = mean(afterVc);
+        viewDropRate   = prevAvgViews > 0 ? Math.max(0, 1 - recentAvgViews / prevAvgViews) : 0;
+      }
+    } else if (creatorVideos.length >= 4) {
+      const viewCounts = creatorVideos
+        .map(v => parseInt(v.statistics.viewCount ?? '0')).filter(v => v > 0);
+      if (viewCounts.length >= 4) {
+        recentAvgViews = mean(viewCounts.slice(0, 3));
+        prevAvgViews   = mean(viewCounts.slice(3, 6));
+        viewDropRate   = prevAvgViews > 0 ? Math.max(0, 1 - recentAvgViews / prevAvgViews) : 0;
+      }
+    }
   }
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -527,6 +590,7 @@ export async function GET(req: NextRequest) {
     hceScore,
     newsSNSScore,
     toxicityScore,
+    cavScore,
   };
 
   const signals = rawToSignals(raw);
@@ -574,6 +638,9 @@ export async function GET(req: NextRequest) {
       recentAvgViews:          Math.round(recentAvgViews),
       prevAvgViews:            Math.round(prevAvgViews),
       commentVelocityZ:        Math.round(commentVelocityZ * 100) / 100,
+      cavScore:                Math.round(cavScore * 10) / 10,
+      beforeVideoCount:        beforeVideos.length,
+      afterVideoCount:         afterVideos.length,
       creatorChannelId,
     },
   });

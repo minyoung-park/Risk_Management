@@ -25,6 +25,7 @@ export interface RawSignalData {
   hceScore?: number;              // 제3자뷰/본인평균뷰 × 10 기반 0~100
   newsSNSScore?: number;          // 일별 기사량 Z-score × 20 기반 0~100
   toxicityScore?: number;         // 영상제목·자막 기반 neg×0.5+title_toxic×0.3+script_toxic×0.2
+  cavScore?: number;              // 노트북 방식 (사건후/사건전 댓글속도 비율-1)×100, 0~100
 }
 
 function rawToSignals(raw: RawSignalData): DRISignals {
@@ -32,7 +33,7 @@ function rawToSignals(raw: RawSignalData): DRISignals {
 
   return {
     searchSpike: clamp(raw.searchSpikeScore ?? raw.searchTrendPeak),
-    commentAttackVelocity: clamp(raw.commentVelocityZ * 6.5),
+    commentAttackVelocity: clamp(raw.cavScore ?? raw.commentVelocityZ * 6.5),
     // 노트북: neg×0.5 + title_toxic×0.3 + script_toxic×0.2 (영상 기반 사전계산 우선)
     toxicityDuplication: clamp(
       raw.toxicityScore ??
